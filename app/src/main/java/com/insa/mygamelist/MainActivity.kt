@@ -4,11 +4,8 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import kotlinx.serialization.Serializable
 import android.os.Bundle
@@ -19,10 +16,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,11 +27,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -53,6 +50,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults.topAppBarColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -63,6 +61,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -73,12 +72,12 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
@@ -126,9 +125,21 @@ class MainViewModel : ViewModel() {
     private val _games = MutableStateFlow<List<Game>>(emptyList())
     val games = _games.asStateFlow()
 
+    private val _isLoadingNewGame = MutableStateFlow(false)
+    val isLoadingNewGame: StateFlow<Boolean> = _isLoadingNewGame
+
+    fun searchNewGame(query: String) {
+        viewModelScope.launch {
+            _isLoadingNewGame.value = true
+            IGDB.getNewGame(query)
+            _isLoadingNewGame.value = false
+            _games.value = IGDB.games
+        }
+    }
+
     fun loadGames(context: Context) {
         viewModelScope.launch {
-            IGDB.load(viewModelScope, object : DataLoadedCallback {
+            IGDB.load(object : DataLoadedCallback {
                 override fun onDataLoaded() {
                     _isLoading.value = false
                     _games.value = IGDB.games
@@ -182,7 +193,6 @@ fun GameCellule(id: Long, onNavigateToGameDetails:(Long)->Unit) {
     val coverUrl = game?.let { IGDB.findCoverById(IGDB.covers, it.cover!!)?.url }
     val genres = game?.genres?.mapNotNull { IGDB.findGenreById(IGDB.genres, it)?.name } ?: emptyList()
     var model by rememberSaveable { mutableIntStateOf(R.raw.no_favori) }
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -200,7 +210,7 @@ fun GameCellule(id: Long, onNavigateToGameDetails:(Long)->Unit) {
                 contentDescription = "logo",
                 modifier = Modifier
                     .height(100.dp)
-                    .aspectRatio(1f) //ça sert pour que l'image reste carré
+                    .aspectRatio(1f)
             )
             Column(
                 modifier = Modifier
@@ -209,6 +219,15 @@ fun GameCellule(id: Long, onNavigateToGameDetails:(Long)->Unit) {
                 horizontalAlignment = Alignment.Start
             ) {
                 game?.let { Text(it.name, fontSize = 24.sp, fontWeight = FontWeight.Bold) }
+
+                val ratingText = game?.totalRating?.let { String.format("%.1f", it) } ?: "N/A"
+                Text(
+                    text = "Note: $ratingText",
+                    fontSize = 18.sp,
+                    fontStyle = FontStyle.Italic,
+                    color = Color.Magenta
+                )
+
                 Text(
                     text = "Genres: " + genres.joinToString(", "),
                     fontSize = 18.sp
@@ -247,9 +266,6 @@ fun GameCellule(id: Long, onNavigateToGameDetails:(Long)->Unit) {
                                 IGDB.saveFavorites(context, IGDB.list_favoris)
 
                             }
-                        }
-                        for (g in IGDB.list_favoris) {
-                            println(g.name)
                         }
                     })
                     .size(30.dp)
@@ -378,7 +394,6 @@ fun sendNotification(context: Context, textTitle: String, textContent: String) {
         return
     }
 
-    // 5. Envoyer la notification
     with(NotificationManagerCompat.from(context)) {
         notify(1, builder.build())
     }
@@ -388,11 +403,12 @@ fun sendNotification(context: Context, textTitle: String, textContent: String) {
 @SuppressLint("ResourceType")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(navController: NavController,viewModel: MainViewModel) {
+fun HomeScreen(navController: NavController, viewModel: MainViewModel) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val selectedGenres = rememberSaveable { mutableStateOf(setOf<String>()) }
     val selectedPlatforms = rememberSaveable { mutableStateOf(setOf<String>()) }
     val games by viewModel.games.collectAsState()
+    val isLoadingNewGame by viewModel.isLoadingNewGame.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
     val allGenres = IGDB.genres.map { it.name }
@@ -408,6 +424,10 @@ fun HomeScreen(navController: NavController,viewModel: MainViewModel) {
         val matchesSearch = game.name.lowercase().contains(query) || gameGenres.any { it.lowercase().contains(query) } || gamePlatforms.any { it.lowercase().contains(query) }
 
         matchesGenre && matchesPlatform && matchesSearch
+    }
+
+    LaunchedEffect(games) {
+        println("mise à jour ...")
     }
 
     Scaffold(
@@ -457,16 +477,25 @@ fun HomeScreen(navController: NavController,viewModel: MainViewModel) {
             LazyColumn {
                 if (filteredGames.isEmpty()) {
                     item {
-                        Image(bitmap = ImageBitmap.imageResource(R.raw.nomatch),
-                            contentDescription = "No match found",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    coroutineScope.launch {
-                                        IGDB.getNewGame(searchQuery)
-                                        //print("new Game ")
+                        if (isLoadingNewGame) {
+                            Image(
+                                bitmap = ImageBitmap.imageResource(R.raw.loading),
+                                contentDescription = "Chargement...",
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            Image(
+                                bitmap = ImageBitmap.imageResource(R.raw.nomatch),
+                                contentDescription = "No match found",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            viewModel.searchNewGame(searchQuery)
+                                        }
                                     }
-                                })
+                            )
+                        }
                     }
                 } else {
                     items(filteredGames) { game ->
@@ -482,6 +511,8 @@ fun HomeScreen(navController: NavController,viewModel: MainViewModel) {
 
 
 
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GameDetailsScreen(id : Long,navController: NavController) {
@@ -490,28 +521,26 @@ fun GameDetailsScreen(id : Long,navController: NavController) {
     val coverUrl = game?.let { IGDB.findCoverById(IGDB.covers, it.cover!!)?.url }
     val genres = game?.genres?.mapNotNull { IGDB.findGenreById(IGDB.genres, it)?.name } ?: emptyList()
     val platforms = IGDB.findPlatformsById(id)
-    val description = game?.summary
 
     Scaffold(
         topBar = {
             TopAppBar(
-                colors =
-                topAppBarColors(
+                colors = topAppBarColors(
                     containerColor = Color.Magenta,
                     titleContentColor = Color.Black,
                 ),
                 title = { game?.name?.let { Text(it) } },
                 navigationIcon = {
-                    IconButton(onClick = {navController.popBackStack()}) {
+                    IconButton(onClick = { navController.popBackStack() }) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Localized description"
+                            contentDescription = "Retour"
                         )
                     }
                 },
             )
         }
-    ){ innerPadding ->
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -519,107 +548,107 @@ fun GameDetailsScreen(id : Long,navController: NavController) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                game?.name?.let { Text(it,fontSize = 24.sp, fontWeight = FontWeight.Bold, style = TextStyle(textDecoration = TextDecoration.Underline))}
-
-                Spacer(modifier = Modifier.width(8.dp))
+                game?.name?.let {
+                    Text(
+                        text = it,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TextStyle(textDecoration = TextDecoration.Underline),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 var model by rememberSaveable { mutableIntStateOf(R.raw.no_favori) }
-                if(game?.let { IGDB.favoriteGame(it) } == true){
-                    model=R.raw.favori
+                if (game?.let { IGDB.favoriteGame(it) } == true) {
+                    model = R.raw.favori
+                } else {
+                    model = R.raw.no_favori
                 }
-                else{
-                    model=R.raw.no_favori
-                }
+
                 AsyncImage(
                     model = model,
-                    contentDescription = "",
+                    contentDescription = "Icône favori",
                     modifier = Modifier
-                        .clickable(onClick = {
+                        .size(30.dp)
+                        .clickable {
                             if (game?.let { IGDB.favoriteGame(it) } == true) {
                                 model = R.raw.no_favori
-                                sendNotification(
-                                    context,
-                                    "${game.name}",
-                                    "${game.name} a été supprimé des favoris."
-                                )
+                                sendNotification(context, "${game.name}", "${game.name} a été supprimé des favoris.")
                                 IGDB.list_favoris.remove(game)
                                 IGDB.saveFavorites(context, IGDB.list_favoris)
-
                             } else {
                                 model = R.raw.favori
-                                if (game != null) {
-                                    sendNotification(
-                                        context,
-                                        "${game.name}",
-                                        "${game.name} a été ajouté aux favoris."
-                                    )
-                                    IGDB.list_favoris.add(game)
+                                game?.let {
+                                    sendNotification(context, "${game.name}", "${game.name} a été ajouté aux favoris.")
+                                    IGDB.list_favoris.add(it)
                                     IGDB.saveFavorites(context, IGDB.list_favoris)
-
                                 }
                             }
-                            for (g in IGDB.list_favoris) {
-                                println(g.name)
-                            }
-                        })
-                        .size(30.dp)
+                        }
                 )
             }
 
-
             AsyncImage(
                 model = "https:$coverUrl",
-                contentDescription = "logo",
+                contentDescription = "Image du jeu",
                 modifier = Modifier
-                    .height(300.dp)
+                    .size(250.dp)
                     .padding(8.dp)
-                    .aspectRatio(1f) //ça sert pour que l'image reste carré
+                    .clip(RoundedCornerShape(10.dp))
             )
+
             Text(
                 text = genres.joinToString(", "),
                 fontSize = 18.sp,
-                fontStyle = FontStyle.Italic
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(8.dp)
             )
-            LazyRow (modifier = Modifier.padding(8.dp)) {
-                if (platforms != null) {
-                    items(platforms) {
-                        logo ->
+
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                platforms?.let {
+                    items(it) { logo ->
                         AsyncImage(
                             model = "https:${logo.url}",
-                            contentDescription = "logo",
+                            contentDescription = "Logo plateforme",
                             modifier = Modifier
-                                .size(100.dp)
+                                .size(80.dp)
                                 .padding(8.dp)
-                                .background(Color.Transparent)
                         )
                     }
                 }
             }
-            Box(modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp)
-                .verticalScroll(rememberScrollState())) {
+
+            game?.summary?.let {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(8.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Text(
-                        text = "$description",
+                        text = it.ifEmpty { "Aucune description disponible." },
                         fontSize = 18.sp,
                         fontStyle = FontStyle.Italic,
-                        style=TextStyle(textAlign=TextAlign.Justify)
+                        textAlign = TextAlign.Justify
                     )
                 }
+            }
         }
     }
-}
 
-@Composable
-fun Image(resourceId: Int) {
-    val uri = Uri.parse("android.resource://com.insa.mygamelist/$resourceId")
-
-    AsyncImage(
-        model = uri,
-        contentDescription = "Game Cover",
-        modifier = Modifier.fillMaxSize()
-        )
 }
 
 

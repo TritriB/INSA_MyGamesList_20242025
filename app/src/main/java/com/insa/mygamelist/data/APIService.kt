@@ -97,8 +97,8 @@ fun extractCoverIds(games: List<Game>): List<Long> {
     return games.map { it.cover!! }
 }
 
-fun extractLogoIds(games: List<Platform>): List<Long> {
-    return games.map { it.platform_logo }
+fun extractLogoIds(platforms: List<Platform>): List<Long> {
+    return platforms.map { it.platform_logo }
 }
 
 class IGDBViewModel : ViewModel() {
@@ -112,6 +112,7 @@ class IGDBViewModel : ViewModel() {
     var idLogos: List<Long> = mutableListOf()
     var idPlatforms: List<Long> = mutableListOf()
     var listGames : List<Game> = mutableListOf()
+    var listPlatforms : List<Platform> = mutableListOf()
 
     suspend fun getGames():MutableList<Game>{
         var response : MutableList<Game> = mutableListOf()
@@ -133,7 +134,7 @@ class IGDBViewModel : ViewModel() {
             val requestBody = if (id == null) {
                 idGenres = extractGenreIds(listGames)
                 val idString = idGenres.joinToString(",")
-                "fields name; where id = ($idString);".toRequestBody("text/plain".toMediaTypeOrNull())
+                "fields name; where id = ($idString);limit ${idGenres.size};".toRequestBody("text/plain".toMediaTypeOrNull())
             } else {
                 "fields name; where id = ($id);".toRequestBody("text/plain".toMediaTypeOrNull())
             }
@@ -169,12 +170,13 @@ class IGDBViewModel : ViewModel() {
             val requestBody = if (id == null) {
                 idPlatforms = extractPlatformIds(listGames)
                 val idString = idPlatforms.joinToString(",")
-                "fields name, platform_logo; where id = ($idString);".toRequestBody("text/plain".toMediaTypeOrNull())
+                "fields name, platform_logo; where id = ($idString);limit ${idPlatforms.size};".toRequestBody("text/plain".toMediaTypeOrNull())
             } else {
                 "fields name, platform_logo; where id = ($id);".toRequestBody("text/plain".toMediaTypeOrNull())
             }
 
             response.addAll(RetrofitInstance.apiService.getPlatforms(clientId, accessToken, accept, requestBody))
+            listPlatforms=response
         } catch (e: Exception) {
             println("Erreur lors de la récupération des plateformes : ${e.message}")
         }
@@ -185,8 +187,9 @@ class IGDBViewModel : ViewModel() {
         val response: MutableList<Logo> = mutableListOf()
         try {
             val requestBody = if (id == null) {
+                idLogos = extractLogoIds(listPlatforms)
                 val idString = idLogos.joinToString(",")
-                "fields url; where id = ($idString);".toRequestBody("text/plain".toMediaTypeOrNull())
+                "fields url; where id = ($idString);limit ${idLogos.size};".toRequestBody("text/plain".toMediaTypeOrNull())
             } else {
                 "fields url; where id = ($id);".toRequestBody("text/plain".toMediaTypeOrNull())
             }

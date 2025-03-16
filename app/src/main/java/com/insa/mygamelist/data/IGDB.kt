@@ -133,7 +133,7 @@ object IGDB {
 
 
 
-    suspend fun load(context: CoroutineScope, callback: DataLoadedCallback) {
+    suspend fun load(callback: DataLoadedCallback) {
         games = api.getGames()
         covers = api.getCovers()
         genres = api.getGenres()
