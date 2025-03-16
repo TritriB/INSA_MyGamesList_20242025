@@ -103,8 +103,8 @@ fun extractLogoIds(platforms: List<Platform>): List<Long> {
 
 class IGDBViewModel : ViewModel() {
 
-    private val clientId = "rzq6vvy9wspsg9n84zw3pb6mf12qam"
-    private val accessToken = "Bearer 0r4n6li9grskwj7c1ulbzaqowms3k0"
+    private val clientId = "..."
+    private val accessToken = "Bearer ..."
     private val accept = "application/json"
 
     var idCovers: List<Long> = mutableListOf()
